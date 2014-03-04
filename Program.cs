@@ -298,99 +298,7 @@ namespace FejesJoco.Tools.RGBGenerator
         #endregion
 
         #region pixel management
-        /// <summary>
-        /// Represents an 8-bit RGB color. Faster and smaller than the framework version, <see cref="Color"/>.
-        /// </summary>
-        struct RGB
-        {
-            public byte R;
-            public byte G;
-            public byte B;
 
-            public Color ToColor()
-            {
-                return Color.FromArgb(R, G, B);
-            }
-
-            public override int GetHashCode()
-            {
-                return R * 256 * 256 + G * 256 + B;
-            }
-
-            public override bool Equals(object obj)
-            {
-                var that = (RGB)obj;
-                return this.GetHashCode() == that.GetHashCode();
-            }
-        }
-
-        /// <summary>
-        /// Represents a pixel in the big image.
-        /// </summary>
-        class Pixel
-        {
-            /// <summary>
-            /// Is this pixel empty? If so, it has no color.
-            /// </summary>
-            public bool Empty;
-
-            /// <summary>
-            /// Color of this pixel.
-            /// </summary>
-            public RGB Color;
-
-            /// <summary>
-            /// Index of this pixel in the queue (<see cref="PixelList"/>), or -1 if it's not queued.
-            /// </summary>
-            public int QueueIndex;
-
-            /// <summary>
-            /// Precalculated array of neighbor pixels.
-            /// </summary>
-            public Pixel[] Neighbors;
-
-            /// <summary>
-            /// A unique weight of thix pixel. Used in comparisons when calculated values are equal. Needs to be randomly distributed, otherwise the
-            /// picture cannot grow equally in every direction.
-            /// </summary>
-            public int Weight;
-
-#if DEBUG
-            // we don't need to know these, just for debugging
-            public int X;
-            public int Y;
-            public override string ToString()
-            {
-                return X + ";" + Y;
-            }
-#endif
-        }
-
-        /// <summary>
-        /// Represents a pixel with a value. Used to sort and merge parallel run results.
-        /// </summary>
-        struct PixelWithValue : IComparable<PixelWithValue>
-        {
-            public Pixel Pixel;
-            public int Value;
-
-            public int CompareTo(PixelWithValue that)
-            {
-                // a parallel run may have no result at all, in that case we prefer the one that has a value
-                if (this.Pixel == null && that.Pixel == null)
-                    return 0;
-                if (this.Pixel == null)
-                    return 1;
-                if (that.Pixel == null)
-                    return -1;
-
-                // compare the values, or use the weight if they're equal
-                var c = this.Value.CompareTo(that.Value);
-                if (c == 0)
-                    c = this.Pixel.Weight.CompareTo(that.Pixel.Weight);
-                return c;
-            }
-        }
 
         /// <summary>
         /// Represents a pixel queue. It's a blend of <see cref="List{T}"/> and <see cref="Dictionary{Tk,Tv}"/> functionality. It allows very quick,
@@ -513,20 +421,27 @@ namespace FejesJoco.Tools.RGBGenerator
             /// <summary>
             /// Every implementation has a pixel queue.
             /// </summary>
-            public abstract PixelQueue Queue { get; }
+            //public abstract PixelQueue Queue { get; }
+
+			public virtual int Count {
+				get { return 0; }
+			}
+
+			public virtual void Init ( int w, int h ) {}
+
+			public virtual void Done () {}
 
             /// <summary>
             /// Places the given color on the image.
             /// </summary>
-            public void Place(RGB c)
-            {
+			public abstract void Place (RGB c);
+            /*{
                 // find the next coordinates
                 Pixel p;
                 if (Queue.Count == 0)
                     p = Image[StartY * Width + StartX];
                 else
                     p = placeImpl(c);
-
                 // put the pixel where it belongs
                 Debug.Assert(p.Empty);
                 p.Empty = false;
@@ -534,12 +449,12 @@ namespace FejesJoco.Tools.RGBGenerator
 
                 // adjust the queue
                 changeQueue(p);
-            }
+            } */
 
             /// <summary>
             /// Places the given color on the image. Can assume that the queue is not empty.
             /// </summary>
-            protected abstract Pixel placeImpl(RGB c);
+           protected abstract Pixel placeImpl(RGB c);
 
             /// <summary>
             /// Adjusts the queue after placing the given pixel.
@@ -555,10 +470,22 @@ namespace FejesJoco.Tools.RGBGenerator
         {
             PixelQueue queue = new PixelQueue();
 
-            public override PixelQueue Queue
-            {
-                get { return queue; }
-            }
+			public override void Place (RGB c)
+			{
+				// find the next coordinates
+				Pixel p;
+				if (queue.Count == 0)
+					p = Image[StartY * Width + StartX];
+				else
+					p = placeImpl(c);
+				// put the pixel where it belongs
+				Debug.Assert(p.Empty);
+				p.Empty = false;
+				p.Color = c;
+
+				// adjust the queue
+				changeQueue(p);
+			}
 
             protected override Pixel placeImpl(RGB c)
             {
@@ -641,10 +568,27 @@ namespace FejesJoco.Tools.RGBGenerator
         {
             PixelQueue<RGB> queue = new PixelQueue<RGB>();
 
-            public override PixelQueue Queue
+            /*public override PixelQueue Queue
             {
                 get { return queue; }
-            }
+            }*/
+
+			public override void Place (RGB c)
+			{
+				// find the next coordinates
+				Pixel p;
+				if (queue.Count == 0)
+					p = Image[StartY * Width + StartX];
+				else
+					p = placeImpl(c);
+				// put the pixel where it belongs
+				Debug.Assert(p.Empty);
+				p.Empty = false;
+				p.Color = c;
+
+				// adjust the queue
+				changeQueue(p);
+			}
 
             protected override Pixel placeImpl(RGB c)
             {
@@ -735,39 +679,93 @@ namespace FejesJoco.Tools.RGBGenerator
             {
                 // sum of neighbors
                 public int R, G, B;
-                // squared sum of neighbors
+				// sum of squared neighbors
                 public int RSq, GSq, BSq;
                 // number of neighbors
                 public int Num;
             }
 
-            PixelQueue<AvgInfo> queue = new PixelQueue<AvgInfo>();
+            PixelQueue<RGB> queue = new PixelQueue<RGB>();
 
-            public override PixelQueue Queue
+			const int BlockSizeLog2 = 3;
+			const int BlockSize = 1 << BlockSizeLog2;
+			const int BlockOffset = 8 - BlockSizeLog2;
+			const int BlockMask = (1 << BlockSizeLog2) - 1;
+
+			List<Pixel>[,,] pixelBlocks = new List<Pixel>[BlockSize,BlockSize,BlockSize];
+			bool[,,] pixelBlocksVisited = new bool[BlockSize,BlockSize,BlockSize];
+            /*public override PixelQueue Queue
             {
                 get { return queue; }
-            }
+            }*/
 
+			public override int Count {
+				get { return queue.Count; }
+			}
+
+			public override void Init ( int w, int h ) {
+				for ( int r = 0; r < BlockSize; r++ ) {
+					for ( int g = 0; g < BlockSize; g++ ) {
+						for ( int b = 0; b < BlockSize; b++ ) {
+							pixelBlocks[r,g,b] = new List<Pixel>();
+						}
+					}
+				}
+			}
+
+			bool addedFirst = false;
+
+			public override void Place (RGB c)
+			{
+				// find the next coordinates
+				Pixel p;
+				if (!addedFirst) {//queue.Count == 0) {
+					addedFirst = true;
+					p = Image [StartY * Width + StartX];
+				} else {
+					p = placeImpl(c);
+				}
+
+				// put the pixel where it belongs
+				Debug.Assert(p.Empty);
+				p.Empty = false;
+				p.Color = c;
+
+				// adjust the queue
+				changeQueue(p);
+			}
+
+			Queue<RGB> st = new Queue<RGB> ();
+			Stack<RGB> undoStack = new Stack<RGB> ();
             protected override Pixel placeImpl(RGB c)
             {
                 // find the best pixel with parallel processing
-                var q = queue.Pixels;
+                /*var q = queue.Pixels;
                 var best = Partitioner.Create(0, queue.UsedUntil, Math.Max(256, queue.UsedUntil / Threads)).AsParallel().Min(range =>
                 {
                     var bestdiff = int.MaxValue;
                     Pixel bestpixel = null;
+
+					var cr = (int)c.R;
+					var cg = (int)c.G;
+					var cb = (int)c.B;
+
+					var crsq = cr*cr;
+					var cgsq = cg*cg;
+					var cbsq = cb*cb;
+
                     for (var i = range.Item1; i < range.Item2; i++)
                     {
                         var qp = q[i];
                         if (qp != null)
                         {
                             var avg = queue.Data[qp.QueueIndex];
-                            var cr = (int)c.R;
-                            var cg = (int)c.G;
-                            var cb = (int)c.B;
-                            var rd = cr * cr * avg.Num + (avg.RSq - 2 * cr * avg.R);
-                            var gd = cg * cg * avg.Num + (avg.GSq - 2 * cg * avg.G);
-                            var bd = cb * cb * avg.Num + (avg.BSq - 2 * cb * avg.B);
+                            
+                            var rd = crsq * avg.Num + (avg.RSq - 2 * cr * avg.R);
+
+                            var gd = cgsq * avg.Num + (avg.GSq - 2 * cg * avg.G);
+
+                            var bd = cbsq * avg.Num + (avg.BSq - 2 * cb * avg.B);
                             var diff = rd + gd + bd;
                             // we have to use the same comparison as PixelWithValue!
                             if (diff < bestdiff || (diff == bestdiff && qp.Weight < bestpixel.Weight))
@@ -785,14 +783,174 @@ namespace FejesJoco.Tools.RGBGenerator
                 }).Pixel;
 
                 // found the pixel, return it
-                queue.Remove(best);
-                return best;
+                queue.Remove(best);*/
+
+				watch2.Start ();
+
+				RGB rounded = new RGB ((c.R >> BlockOffset) & BlockMask, (c.G >> BlockOffset) & BlockMask, (c.B >> BlockOffset) & BlockMask);
+
+				st.Clear ();
+
+				st.Enqueue (rounded);
+
+				int bestDiff = int.MaxValue;
+				Pixel bestPixel = null;
+				RGB bestBlock = new RGB (0, 0, 0);
+				int bestIndexInBlock = 0;
+				//System.Console.WriteLine ("Popping...");
+
+				int tot = 0;
+				int count = 0;
+				int bestAfter = 0;
+				int bestAfterFirstIndex = int.MaxValue;
+				int bestAfterFirst = 0;
+				while ( st.Count > 0 ) {
+					count++;
+					RGB coord = st.Dequeue ();
+					undoStack.Push (coord);
+
+					RGB mn = new RGB (coord.R << BlockOffset, coord.G << BlockOffset, coord.B << BlockOffset);
+					RGB mx = new RGB ((coord.R << BlockOffset) + BlockMask, (coord.G << BlockOffset) + BlockMask, (coord.B << BlockOffset) + BlockMask);
+
+					RGB closest = new RGB(c.R < mn.R ? mn.R : (c.R > mx.R ? mx.R : c.R),
+					                      c.G < mn.G ? mn.G : (c.G > mx.G ? mx.G : c.G),
+					                      c.B < mn.B ? mn.B : (c.B > mx.B ? mx.B : c.B));
+
+					int dr = (closest.R - c.R);
+					int dg = (closest.G - c.G);
+					int db = (closest.B - c.B);
+					int diff = dr*dr + dg*dg + db*db;
+
+					if ( diff > bestDiff ) continue;
+
+					if (coord.R > 0 && !pixelBlocksVisited [coord.R - 1, coord.G - 0, coord.B - 0]) {
+						pixelBlocksVisited [coord.R - 1, coord.G - 0, coord.B - 0] = true;
+						st.Enqueue (new RGB (coord.R - 1, coord.G - 0, coord.B - 0));
+					}
+
+					if (coord.G > 0 && !pixelBlocksVisited [coord.R - 0, coord.G - 1, coord.B - 0]) {
+						pixelBlocksVisited [coord.R - 0, coord.G - 1, coord.B - 0] = true;
+						st.Enqueue (new RGB (coord.R - 0, coord.G - 1, coord.B - 0));
+					}
+
+					if (coord.B > 0 && !pixelBlocksVisited [coord.R - 0, coord.G - 0, coord.B - 1]) {
+						pixelBlocksVisited [coord.R - 0, coord.G - 0, coord.B - 1] = true;
+						st.Enqueue (new RGB (coord.R - 0, coord.G - 0, coord.B - 1));
+					}
+
+					if (coord.R < BlockMask && !pixelBlocksVisited [coord.R + 1, coord.G + 0, coord.B + 0]) {
+						pixelBlocksVisited [coord.R + 1, coord.G + 0, coord.B + 0] = true;
+						st.Enqueue (new RGB (coord.R + 1, coord.G + 0, coord.B + 0));
+					}
+
+					if (coord.G < BlockMask && !pixelBlocksVisited [coord.R + 0, coord.G + 1, coord.B + 0]) {
+						pixelBlocksVisited [coord.R + 0, coord.G + 1, coord.B + 0] = true;
+						st.Enqueue (new RGB (coord.R + 0, coord.G + 1, coord.B + 0));
+					}
+
+					if (coord.B < BlockMask && !pixelBlocksVisited [coord.R + 0, coord.G + 0, coord.B + 1]) {
+						pixelBlocksVisited [coord.R + 0, coord.G + 0, coord.B + 1] = true;
+						st.Enqueue (new RGB (coord.R + 0, coord.G + 0, coord.B + 1));
+					}
+
+					List<Pixel> pxl = pixelBlocks[coord.R,coord.G,coord.B];
+
+					if (pxl.Count > 0) {
+						//System.Console.WriteLine ("Block " + coord.ToString ());
+					}
+
+					tot += pxl.Count;
+
+					for ( int i = 0; i < pxl.Count; i++ ) {
+						//System.Console.WriteLine (pxl [i].QueueIndex);
+						var avg = pxl [i].avg;//queue.Data[pxl[i].QueueIndex];
+						var rd = (int)avg.R - c.R;
+						var gd = (int)avg.G - c.G;
+						var bd = (int)avg.B - c.B;
+						diff = rd * rd + gd * gd + bd * bd;
+						// we have to use the same comparison as PixelWithValue!
+						if (diff < bestDiff || (diff == bestDiff && pxl[i].Weight < bestPixel.Weight))
+						{
+							bestDiff = diff;
+							bestPixel = pxl[i];
+							bestBlock = coord;
+							bestAfter = count;
+							bestIndexInBlock = i;
+
+							/*if ( bestAfterFirstIndex == int.MaxValue ) {
+								bestAfterFirstIndex = (int)Math.Ceiling(System.Math.Pow ((System.Math.Pow (count, 1.0 / 3) + 1), 3));//count + st.Count;
+							} else if ( count >= bestAfterFirstIndex ) {
+								bestAfterFirst++;
+							}*/
+						}
+					}
+				}
+
+				watch2.Stop ();
+				watch3.Start ();
+				/*for ( int r = 0; r < BlockSize; r++ ) {
+					for ( int g = 0; g < BlockSize; g++ ) {
+						for ( int b = 0; b < BlockSize; b++ ) {
+							pixelBlocksVisited[r,g,b] = false;
+						}
+					}
+				}*/
+				while (undoStack.Count > 0) {
+					RGB coord = undoStack.Pop ();
+					pixelBlocksVisited[coord.R,coord.G,coord.B] = false;
+				}
+
+				watch3.Stop ();
+				watch4.Start ();
+				if (count >= bestAfterFirstIndex) {
+					//Console.WriteLine (count + " "  + bestAfterFirstIndex);
+				}
+
+				if ( bestDiff == int.MaxValue ) {
+					throw new System.Exception ("No possible positions");
+				}
+
+				//System.Console.WriteLine ("Removing here");
+
+				if (!pixelBlocks [bestPixel.block.R, bestPixel.block.G, bestPixel.block.B].Remove (bestPixel)) {
+					throw new System.Exception ("Could not remove pixel from " + bestPixel.block.ToString() + " (was found in " + bestBlock.ToString()+")");
+				}
+
+				if (bestAfterFirst > 0) {
+					//System.Console.WriteLine (bestAfterFirst);
+				} else {
+					//Console.WriteLine ("Nope");
+				}
+
+				if ( tot % 1000 == 0 ) {
+					//System.Console.WriteLine (count + " its " + bestAfter + " " + tot + " " + queue.Count + " " + pixelBlocks [bestPixel.block.R, bestPixel.block.G, bestPixel.block.B].Count);
+				}
+
+				//queue.Remove(bestPixel);
+
+				bestPixel.inQueue = false;
+
+				watch4.Stop ();
+				return bestPixel;
             }
+
+			public override void Done () {
+				System.Console.WriteLine (watch1.Elapsed.TotalMilliseconds.ToString("0"));
+				System.Console.WriteLine (watch2.Elapsed.TotalMilliseconds.ToString("0"));
+				System.Console.WriteLine (watch3.Elapsed.TotalMilliseconds.ToString("0"));
+				System.Console.WriteLine (watch4.Elapsed.TotalMilliseconds.ToString("0"));
+			}
+
+			Stopwatch watch1 = new Stopwatch();
+			Stopwatch watch2 = new Stopwatch();
+			Stopwatch watch3 = new Stopwatch();
+			Stopwatch watch4 = new Stopwatch();
 
             protected override void changeQueue(Pixel p)
             {
+				watch1.Start ();
                 // recalculate the neighbors
-                for (var i = 0; i < p.Neighbors.Length; i++)
+                /*for (var i = 0; i < p.Neighbors.Length; i++)
                 {
                     var np = p.Neighbors[i];
                     if (np.Empty)
@@ -825,11 +983,66 @@ namespace FejesJoco.Tools.RGBGenerator
                             BSq = bsq,
                             Num = n
                         };
-                        if (np.QueueIndex == -1)
-                            queue.Add(np);
-                        queue.Data[np.QueueIndex] = avg;
+						if (np.QueueIndex == -1) {
+							queue.Add (np);
+						} else {
+							if (!pixelBlocks [np.block.R, np.block.G, np.block.B].Remove (np)) {
+								Console.WriteLine ("Could not remove even though it should be in the block");
+							}
+						}
+
+						pixelBlocks [(r / np.Neighbors.Length) & 0x1F, (g / np.Neighbors.Length) & 0x1F, (b / np.Neighbors.Length) & 0x1F].Add (p);
+						queue.Data[np.QueueIndex] = avg;
                     }
-                }
+                }*/
+
+				for (var i = 0; i < p.Neighbors.Length; i++)
+				{
+					var np = p.Neighbors[i];
+					if (np.Empty)
+					{
+						int r = 0, g = 0, b = 0, n = 0;
+						for (var j = 0; j < np.Neighbors.Length; j++)
+						{
+							var nnp = np.Neighbors[j];
+							if (!nnp.Empty)
+							{
+								r += nnp.Color.R;
+								g += nnp.Color.G;
+								b += nnp.Color.B;
+								n++;
+							}
+						}
+						var avg = new RGB
+						{
+							R = (byte)(r / n),
+							G = (byte)(g / n),
+							B = (byte)(b / n)
+						};
+
+						RGB newBlock = new RGB ((avg.R>>BlockOffset) & BlockMask, (avg.G>>BlockOffset) & BlockMask, (avg.B>>BlockOffset) & BlockMask);
+
+						if (!np.inQueue) {
+							//queue.Add (np);
+							np.block = newBlock;
+							np.inQueue = true;
+							pixelBlocks [np.block.R,np.block.G,np.block.B].Add (np);
+							//System.Console.WriteLine ("Adding in block " + np.block.ToString () + " " + np.QueueIndex);
+						} else if ( !newBlock.Equals(np.block) ) {
+							if (!pixelBlocks [np.block.R, np.block.G, np.block.B].Remove (np)) {
+								Console.WriteLine ("Could not remove even though it should be in the block");
+							}
+							np.inQueue = true;
+							np.block = newBlock;
+							pixelBlocks [np.block.R,np.block.G,np.block.B].Add (np);
+							//System.Console.WriteLine ("Replacing in block " + np.block.ToString () + " " + np.QueueIndex);
+						}
+
+						np.avg = avg;
+						//queue.Data[np.QueueIndex] = avg;
+					}
+				}
+				watch1.Stop ();
             }
         }
         #endregion
@@ -865,29 +1078,44 @@ namespace FejesJoco.Tools.RGBGenerator
             var start = DateTime.Now;
             Console.WriteLine("Running the precalculations and eating up your memory...");
 
+			Console.WriteLine ("Generating colors");
             // create every color once and randomize their order
-            var colors = new List<RGB>(Width * Height);
-            for (var r = 0; r < NumColors; r++)
-                for (var g = 0; g < NumColors; g++)
-                    for (var b = 0; b < NumColors; b++)
-                        colors.Add(new RGB
-                        {
-                            R = (byte)(r * 255 / (NumColors - 1)),
-                            G = (byte)(g * 255 / (NumColors - 1)),
-                            B = (byte)(b * 255 / (NumColors - 1))
-                        });
-            colors.Sort(Sorter);
-            Debug.Assert(colors.Count == Width * Height);
+			var colors = new RGB[Width * Height];
+            for (var r = 0; r < NumColors; r++) {
+				byte R = (byte)(r * 255 / (NumColors - 1));
+				for (var g = 0; g < NumColors; g++) {
+					byte G = (byte)(g * 255 / (NumColors - 1));
+					for (var b = 0; b < NumColors; b++) {
+						colors[r*NumColors*NumColors + g*NumColors + b] = new RGB {
+							R = R,
+							G = G,
+							B = (byte)(b * 255 / (NumColors - 1))
+						};
+					}
+				}
+			}
+		
 
+			Console.WriteLine ("Sorting...");
+            Array.Sort (colors,Sorter);
+            Debug.Assert(colors.Length == Width * Height);
+
+			Console.WriteLine ("Randomizing weights");
             // create the pixels and their unique weights
             Image = new Pixel[Width * Height];
+
+			//int[] weights = new int[Width*Height];
+			//for (int i = 0; i < weights.Length; i++) weights [i] = RndGen.Next ();
+
+			int dupCount = 0;
             var weights = new HashSet<int>();
             for (var y = 0; y < Height; y++)
                 for (var x = 0; x < Width; x++)
                 {
-                    int weight;
+					int weight = -1;
                     do
                     {
+					if ( weight != -1 ) dupCount++;
                         weight = RndGen.Next();
                     } while (!weights.Add(weight));
                     Image[y * Width + x] = new Pixel
@@ -902,44 +1130,70 @@ namespace FejesJoco.Tools.RGBGenerator
                     };
                 }
 
+			Console.WriteLine ("Duplicate rns: " + dupCount + " of " + (Width*Height));
+			Console.WriteLine ("Calculating neighbours");
             // precalculate the neighbors of every pixel
             Debug.Assert(NeighX.Length == NeighY.Length);
-            for (var y = 0; y < Height; y++)
-                for (var x = 0; x < Width; x++)
-                {
-                    Image[y * Width + x].Neighbors = Enumerable.Range(0, NeighX.Length).Select(n =>
-                    {
-                        var y2 = y + NeighY[n];
-                        if (y2 < 0 || y2 == Height)
-                            return null;
-                        var x2 = x + NeighX[n];
-                        if (x2 < 0 || x2 == Width)
-                            return null;
-                        return Image[y2 * Width + x2];
-                    }).Where(p => p != null).ToArray();
-                }
 
+			List<Pixel> ng = new List<Pixel>();
+
+			for (var y = 0; y < Height; y++) {
+				for (var x = 0; x < Width; x++) {
+					ng.Clear ();
+
+					for (int i = 0; i < NeighX.Length; i++) {
+						var y2 = y + NeighY [i];
+						if (y2 < 0 || y2 == Height)
+							continue;
+						var x2 = x + NeighX [i];
+						if (x2 < 0 || x2 == Width)
+							continue;
+						ng.Add (Image [y2 * Width + x2]);
+					}
+
+					//Image [y * Width + x].Neighbors = Enumerable.Range (0, NeighX.Length).Select (n =>
+					//{
+						
+					//}).Where (p => p != null).ToArray ();
+					Image [y * Width + x].Neighbors = ng.ToArray ();
+				}
+			}
+
+			Console.WriteLine ("Generating checkpoints");
             // calculate the saving checkpoints in advance
-            var checkpoints = Enumerable.Range(1, NumFrames).ToDictionary(i => (long)i * colors.Count / NumFrames - 1, i => i - 1);
+            //var checkpoints = Enumerable.Range(1, NumFrames).ToDictionary(i => (long)i * colors.Count / NumFrames - 1, i => i - 1);
+			var checkpoints = new List<long> ();
+			var checkpointIndex = 0;
+			for (int i = 0; i < NumFrames; i++) {
+
+				checkpoints.Add ((((long)(i+1) * colors.Length) / NumFrames) - 1);
+				System.Console.WriteLine ("Checkpoint " + checkpoints[checkpoints.Count - 1] + " " + colors.Length);
+			}
+
             Thread pngthread = null;
 
+			Algorithm.Init (Width, Height);
+
             // loop through all colors that we want to place
-            for (var i = 0; i < colors.Count; i++)
+			for (var i = 0; i < colors.Length; i++)
             {
                 // give progress report to the impatient user
-                if (i % 1024 == 0)
+                if (i % 4096 == 0)
                 {
-                    Algorithm.Queue.Compress();
-                    Console.WriteLine("{0:P}, queue size {1}", (double)i / Width / Height, Algorithm.Queue.Count);
+                    //Algorithm.Queue.Compress();
+					Console.WriteLine ("{0:P}, queue size {1}", (double)i / Width / Height, Algorithm.Count);
                 }
 
                 // run the algorithm
                 Algorithm.Place(colors[i]);
 
                 // save a checkpoint if needed
-                int chkidx;
-                if (checkpoints.TryGetValue(i, out chkidx))
+
+				if (checkpointIndex < checkpoints.Count && checkpoints[checkpointIndex] == i) //checkpoints.TryGetValue(i, out chkidx))
                 {
+					int chkidx = checkpointIndex;
+					checkpointIndex++;
+
                     // create the image
                     var img = new Bitmap(Width, Height, PixelFormat.Format24bppRgb);
                     var idata = img.LockBits(new Rectangle(0, 0, Width, Height), ImageLockMode.WriteOnly, PixelFormat.Format24bppRgb);
@@ -968,28 +1222,29 @@ namespace FejesJoco.Tools.RGBGenerator
                     pngthread.Start();
                 }
             }
-            Debug.Assert(Algorithm.Queue.Count == 0);
+
+			Algorithm.Done ();
+
+            //Debug.Assert(Algorithm.Queue.Count == 0);
 
             // wait for the final image
             pngthread.Join();
 
             // check the number of colors to be sure
             var img2 = (Bitmap)Bitmap.FromFile(string.Format("result{0:D5}.png", NumFrames - 1));
-            var ch = new HashSet<RGB>();
-            for (var y = 0; y < img2.Height; y++)
+
+			bool[] used = new bool[256*256*256];
+            for (var y = 0; y < img2.Height; y++) {
                 for (var x = 0; x < img2.Width; x++)
                 {
                     var pix = img2.GetPixel(x, y);
-                    if (!ch.Add(new RGB
-                    {
-                        R = pix.R,
-                        G = pix.G,
-                        B = pix.B
-                    }))
-                    {
-                        Console.WriteLine("Color {0}/{1}/{2} is added more than once!!!!!!", pix.R, pix.G, pix.B);
-                    }
+					if (used [pix.R * 256 * 256 + pix.G * 256 + pix.B]) {
+						Console.WriteLine ("Color {0}/{1}/{2} is added more than once!!!!!!", pix.R, pix.G, pix.B);
+					} else {
+						used [pix.R * 256 * 256 + pix.G * 256 + pix.B] = true;
+					}
                 }
+			}
             img2.Dispose();
 
             // we're done!
