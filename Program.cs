@@ -1194,9 +1194,30 @@ namespace FejesJoco.Tools.RGBGenerator
 				System.Console.WriteLine ("Checkpoint " + checkpoints[checkpoints.Count - 1] + " " + colors.Length);
 			}
 
-            Thread pngthread = null;
-
 			Algorithm.Init (Width, Height);
+
+			byte[] ibytes = null;
+			BitmapData bitmapData = null;
+			bool runPNGThread = true;
+			System.Threading.AutoResetEvent runPNGEvent = new AutoResetEvent (false);
+			System.Threading.AutoResetEvent PNGDoneEvent = new AutoResetEvent (true);
+			int pngImageIndex = 0;
+			Bitmap img = null;
+
+			var pngThread = new Thread(new ThreadStart(delegate {
+				while (true) {
+					runPNGEvent.WaitOne ();
+					if (!runPNGThread) return;
+
+					Marshal.Copy(ibytes, 0, bitmapData.Scan0, ibytes.Length);
+					img.UnlockBits(bitmapData);
+					img.Save(string.Format("result{0:D5}.png", pngImageIndex), ImageFormat.Png);
+					//img.Dispose();
+					PNGDoneEvent.Set();
+				}
+			}));
+
+			pngThread.Start ();
 
             // loop through all colors that we want to place
 			for (var i = 0; i < colors.Length; i++)
@@ -1215,35 +1236,34 @@ namespace FejesJoco.Tools.RGBGenerator
 
 				if (checkpointIndex < checkpoints.Count && checkpoints[checkpointIndex] == i) //checkpoints.TryGetValue(i, out chkidx))
                 {
-					int chkidx = checkpointIndex;
+					// png compression uses only one processor, so push it into the background, limiting to one thread at a time is more than enough
+					PNGDoneEvent.WaitOne ();
+
+					pngImageIndex = checkpointIndex;
 					checkpointIndex++;
 
                     // create the image
-                    var img = new Bitmap(Width, Height, PixelFormat.Format24bppRgb);
-                    var idata = img.LockBits(new Rectangle(0, 0, Width, Height), ImageLockMode.WriteOnly, PixelFormat.Format24bppRgb);
-                    var ibytes = new byte[idata.Stride * idata.Height];
+                    if (img == null) img = new Bitmap(Width, Height, PixelFormat.Format24bppRgb);
+                    bitmapData = img.LockBits(new Rectangle(0, 0, Width, Height), ImageLockMode.WriteOnly, PixelFormat.Format24bppRgb);
+
+					int stride = bitmapData.Stride;
+					if (ibytes == null) {
+						ibytes = new byte[stride * bitmapData.Height];
+					}
+
+
                     for (var y = 0; y < Height; y++)
                     {
                         for (var x = 0; x < Width; x++)
                         {
                             var c = Image[y * Width + x].Color;
-                            ibytes[y * idata.Stride + x * 3 + 2] = c.R;
-                            ibytes[y * idata.Stride + x * 3 + 1] = c.G;
-                            ibytes[y * idata.Stride + x * 3 + 0] = c.B;
+							ibytes[y * stride + x * 3 + 2] = c.R;
+							ibytes[y * stride + x * 3 + 1] = c.G;
+							ibytes[y * stride + x * 3 + 0] = c.B;
                         }
                     }
-                    Marshal.Copy(ibytes, 0, idata.Scan0, ibytes.Length);
-                    img.UnlockBits(idata);
 
-                    // png compression uses only one processor, so push it into the background, limiting to one thread at a time is more than enough
-                    if (pngthread != null)
-                        pngthread.Join();
-                    pngthread = new Thread(new ThreadStart(delegate
-                    {
-                        img.Save(string.Format("result{0:D5}.png", chkidx), ImageFormat.Png);
-                        img.Dispose();
-                    }));
-                    pngthread.Start();
+					runPNGEvent.Set ();
                 }
             }
 
@@ -1251,17 +1271,21 @@ namespace FejesJoco.Tools.RGBGenerator
 
             //Debug.Assert(Algorithm.Queue.Count == 0);
 
+			// Stop thread
+			runPNGThread = false;
+			runPNGEvent.Set ();
+
             // wait for the final image
-            pngthread.Join();
+			PNGDoneEvent.WaitOne ();
 
             // check the number of colors to be sure
-            var img2 = (Bitmap)Bitmap.FromFile(string.Format("result{0:D5}.png", NumFrames - 1));
+            //var img2 = (Bitmap)Bitmap.FromFile(string.Format("result{0:D5}.png", NumFrames - 1));
 
 			bool[] used = new bool[256*256*256];
-            for (var y = 0; y < img2.Height; y++) {
-                for (var x = 0; x < img2.Width; x++)
+            for (var y = 0; y < Height; y++) {
+                for (var x = 0; x < Width; x++)
                 {
-                    var pix = img2.GetPixel(x, y);
+					var pix = Image [y * Width + x].Color;//img2.GetPixel(x, y);
 					if (used [pix.R * 256 * 256 + pix.G * 256 + pix.B]) {
 						Console.WriteLine ("Color {0}/{1}/{2} is added more than once!!!!!!", pix.R, pix.G, pix.B);
 					} else {
@@ -1269,7 +1293,7 @@ namespace FejesJoco.Tools.RGBGenerator
 					}
                 }
 			}
-            img2.Dispose();
+            //img2.Dispose();
 
             // we're done!
             Console.WriteLine("All done! It took this long: {0}", DateTime.Now.Subtract(start));
