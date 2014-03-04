@@ -16,8 +16,10 @@ namespace FejesJoco.Tools.RGBGenerator
 
 		public bool inQueue;
 
+		public byte nonEmptyNeigh = 0;
 		public int block;
 		//public int indexInBlock;
+
 
 		public RGB avg;
 		/// <summary>
@@ -32,8 +34,6 @@ namespace FejesJoco.Tools.RGBGenerator
 			get { return 0; }
 			set {}
 		}
-
-		public byte Connections;
 
 		/// <summary>
 		/// Precalculated array of neighbor pixels.
