@@ -147,19 +147,19 @@ namespace FejesJoco.Tools.RGBGenerator
             }
 
             // [colors]
-            if (!twopows.Contains(args[0]) || !int.TryParse(args[0], out NumColors) || NumColors > 256)
+            if (/*!twopows.Contains(args[0]) ||*/ !int.TryParse(args[0], out NumColors) || NumColors > 256)
             {
                 Console.WriteLine("[colors] is an invalid number");
                 return false;
             }
 
             // [width] and [height]
-            if (!twopows.Contains(args[1]) || !int.TryParse(args[1], out Width))
+            if (/*!twopows.Contains(args[1]) ||*/ !int.TryParse(args[1], out Width))
             {
                 Console.WriteLine("[width] is an invalid number");
                 return false;
             }
-            if (!twopows.Contains(args[2]) || !int.TryParse(args[2], out Height))
+            if (/*!twopows.Contains(args[2]) ||*/ !int.TryParse(args[2], out Height))
             {
                 Console.WriteLine("[height] is an invalid number");
                 return false;
@@ -236,8 +236,16 @@ namespace FejesJoco.Tools.RGBGenerator
                     return false;
                 }
                 Sorter = new HueComparer(hueshift);
-            }
-            else
+			}else if (args[8].StartsWith("lum-"))
+			{
+				int hueshift;
+				if (!int.TryParse(args[8].Substring(4), out hueshift) || hueshift < 0 || hueshift > 360)
+				{
+					Console.WriteLine("[sorting] has an invalid hue parameter");
+					return false;
+				}
+				Sorter = new LumComparer(hueshift);
+			} else
             {
                 Console.WriteLine("[sorting] is not one of the allowed values");
                 return false;
@@ -297,6 +305,32 @@ namespace FejesJoco.Tools.RGBGenerator
                 return c;
             }
         }
+
+		/// <summary>
+		/// Compares by brightness first, then by hue, and finally random.
+		/// </summary>
+		class LumComparer : IComparer<RGB>
+		{
+			private int shift;
+
+			public LumComparer(int shift)
+			{
+				this.shift = shift;
+			}
+
+			public int Compare(RGB x, RGB y)
+			{
+				var xc = x.ToColor();
+				var yc = y.ToColor();
+				var c = xc.GetBrightness().CompareTo(yc.GetBrightness());
+				if (c == 0)
+						c = ((xc.GetHue() + shift) % 360).CompareTo((yc.GetHue() + shift) % 360);
+				if (c == 0)
+					c = RndGen.Next(11) - 5;
+				return c;
+			}
+		}
+
         #endregion
 
         #region pixel management
