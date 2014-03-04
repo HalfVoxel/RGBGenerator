@@ -16,7 +16,7 @@ namespace FejesJoco.Tools.RGBGenerator
 
 		public bool inQueue;
 
-		public RGB block;
+		public int block;
 		//public int indexInBlock;
 
 		public RGB avg;
@@ -33,6 +33,7 @@ namespace FejesJoco.Tools.RGBGenerator
 			set {}
 		}
 
+		public byte Connections;
 
 		/// <summary>
 		/// Precalculated array of neighbor pixels.

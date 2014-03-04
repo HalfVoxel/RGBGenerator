@@ -2,24 +2,11 @@
   <MonoDevelop.Ide.Workspace ActiveConfiguration="Debug" />
   <MonoDevelop.Ide.Workbench ActiveDocument="Program.cs">
     <Files>
-      <File FileName="Program.cs" Line="701" Column="20" />
-      <File FileName="PriorityQueue.cs" Line="164" Column="30" />
-      <File FileName="Pixel.cs" Line="16" Column="3" />
-      <File FileName="RGB.cs" Line="25" Column="19" />
+      <File FileName="Program.cs" Line="482" Column="1" />
+      <File FileName="PriorityQueue.cs" Line="1" Column="1" />
+      <File FileName="Pixel.cs" Line="1" Column="1" />
+      <File FileName="RGB.cs" Line="1" Column="1" />
     </Files>
-    <Pads>
-      <Pad Id="ProjectPad">
-        <State expanded="True">
-          <Node name="FejesJoco.Tools.RGBGenerator" expanded="True" selected="True">
-            <Node name="References" expanded="True" />
-            <Node name="Properties" expanded="True" />
-          </Node>
-        </State>
-      </Pad>
-      <Pad Id="ClassPad">
-        <State expanded="True" selected="True" />
-      </Pad>
-    </Pads>
   </MonoDevelop.Ide.Workbench>
   <MonoDevelop.Ide.DebuggingService.Breakpoints>
     <BreakpointStore />

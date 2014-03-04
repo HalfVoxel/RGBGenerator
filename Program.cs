@@ -692,8 +692,8 @@ namespace FejesJoco.Tools.RGBGenerator
 			const int BlockOffset = 8 - BlockSizeLog2;
 			const int BlockMask = (1 << BlockSizeLog2) - 1;
 
-			List<Pixel>[,,] pixelBlocks = new List<Pixel>[BlockSize,BlockSize,BlockSize];
-			bool[,,] pixelBlocksVisited = new bool[BlockSize,BlockSize,BlockSize];
+			List<Pixel>[] pixelBlocks = new List<Pixel>[BlockSize*BlockSize*BlockSize];
+			bool[] pixelBlocksVisited = new bool[BlockSize*BlockSize*BlockSize];
             /*public override PixelQueue Queue
             {
                 get { return queue; }
@@ -707,7 +707,7 @@ namespace FejesJoco.Tools.RGBGenerator
 				for ( int r = 0; r < BlockSize; r++ ) {
 					for ( int g = 0; g < BlockSize; g++ ) {
 						for ( int b = 0; b < BlockSize; b++ ) {
-							pixelBlocks[r,g,b] = new List<Pixel>();
+							pixelBlocks[r*BlockSize*BlockSize + g*BlockSize + b] = new List<Pixel>();
 						}
 					}
 				}
@@ -735,8 +735,13 @@ namespace FejesJoco.Tools.RGBGenerator
 				changeQueue(p);
 			}
 
-			Queue<RGB> st = new Queue<RGB> ();
-			Stack<RGB> undoStack = new Stack<RGB> ();
+			Queue<int> st = new Queue<int> ();
+			Stack<int> undoStack = new Stack<int> ();
+
+			const int ROffset = BlockSize * BlockSize;
+			const int GOffset = BlockSize;
+			const int BOffset = 1;
+
             protected override Pixel placeImpl(RGB c)
             {
                 // find the best pixel with parallel processing
@@ -791,11 +796,9 @@ namespace FejesJoco.Tools.RGBGenerator
 
 				st.Clear ();
 
-				st.Enqueue (rounded);
-
 				int bestDiff = int.MaxValue;
 				Pixel bestPixel = null;
-				RGB bestBlock = new RGB (0, 0, 0);
+				int bestBlock = -1;
 				int bestIndexInBlock = 0;
 				//System.Console.WriteLine ("Popping...");
 
@@ -804,13 +807,21 @@ namespace FejesJoco.Tools.RGBGenerator
 				int bestAfter = 0;
 				int bestAfterFirstIndex = int.MaxValue;
 				int bestAfterFirst = 0;
+
+				st.Enqueue (rounded.R*ROffset + rounded.G*GOffset + rounded.B*BOffset);
+
 				while ( st.Count > 0 ) {
 					count++;
-					RGB coord = st.Dequeue ();
+					int coord = st.Dequeue ();
 					undoStack.Push (coord);
 
-					RGB mn = new RGB (coord.R << BlockOffset, coord.G << BlockOffset, coord.B << BlockOffset);
-					RGB mx = new RGB ((coord.R << BlockOffset) + BlockMask, (coord.G << BlockOffset) + BlockMask, (coord.B << BlockOffset) + BlockMask);
+					RGB expanded = new RGB ();
+					expanded.R = (byte)((coord >> (BlockSizeLog2*2)) & BlockMask);
+					expanded.G = (byte)((coord >> (BlockSizeLog2*1)) & BlockMask);
+					expanded.B = (byte)((coord >> (BlockSizeLog2*0)) & BlockMask);
+
+					RGB mn = new RGB (expanded.R << BlockOffset, expanded.G << BlockOffset, expanded.B << BlockOffset);
+					RGB mx = new RGB ((expanded.R << BlockOffset) + BlockMask, (expanded.G << BlockOffset) + BlockMask, (expanded.B << BlockOffset) + BlockMask);
 
 					RGB closest = new RGB(c.R < mn.R ? mn.R : (c.R > mx.R ? mx.R : c.R),
 					                      c.G < mn.G ? mn.G : (c.G > mx.G ? mx.G : c.G),
@@ -823,37 +834,37 @@ namespace FejesJoco.Tools.RGBGenerator
 
 					if ( diff > bestDiff ) continue;
 
-					if (coord.R > 0 && !pixelBlocksVisited [coord.R - 1, coord.G - 0, coord.B - 0]) {
-						pixelBlocksVisited [coord.R - 1, coord.G - 0, coord.B - 0] = true;
-						st.Enqueue (new RGB (coord.R - 1, coord.G - 0, coord.B - 0));
+					if (expanded.R > 0 && !pixelBlocksVisited [coord - ROffset]) {
+						pixelBlocksVisited [coord - ROffset] = true;
+						st.Enqueue (coord - ROffset);
 					}
 
-					if (coord.G > 0 && !pixelBlocksVisited [coord.R - 0, coord.G - 1, coord.B - 0]) {
-						pixelBlocksVisited [coord.R - 0, coord.G - 1, coord.B - 0] = true;
-						st.Enqueue (new RGB (coord.R - 0, coord.G - 1, coord.B - 0));
+					if (expanded.G > 0 && !pixelBlocksVisited [coord - BOffset]) {
+						pixelBlocksVisited [coord - GOffset] = true;
+						st.Enqueue (coord - GOffset);
 					}
 
-					if (coord.B > 0 && !pixelBlocksVisited [coord.R - 0, coord.G - 0, coord.B - 1]) {
-						pixelBlocksVisited [coord.R - 0, coord.G - 0, coord.B - 1] = true;
-						st.Enqueue (new RGB (coord.R - 0, coord.G - 0, coord.B - 1));
+					if (expanded.B > 0 && !pixelBlocksVisited [coord - BOffset]) {
+						pixelBlocksVisited [coord - BOffset] = true;
+						st.Enqueue (coord - BOffset);
 					}
 
-					if (coord.R < BlockMask && !pixelBlocksVisited [coord.R + 1, coord.G + 0, coord.B + 0]) {
-						pixelBlocksVisited [coord.R + 1, coord.G + 0, coord.B + 0] = true;
-						st.Enqueue (new RGB (coord.R + 1, coord.G + 0, coord.B + 0));
+					if (expanded.R < BlockMask && !pixelBlocksVisited [coord + ROffset]) {
+						pixelBlocksVisited [coord + ROffset] = true;
+						st.Enqueue (coord + ROffset);
 					}
 
-					if (coord.G < BlockMask && !pixelBlocksVisited [coord.R + 0, coord.G + 1, coord.B + 0]) {
-						pixelBlocksVisited [coord.R + 0, coord.G + 1, coord.B + 0] = true;
-						st.Enqueue (new RGB (coord.R + 0, coord.G + 1, coord.B + 0));
+					if (expanded.G < BlockMask && !pixelBlocksVisited [coord + GOffset]) {
+						pixelBlocksVisited [coord + GOffset] = true;
+						st.Enqueue (coord + GOffset);
 					}
 
-					if (coord.B < BlockMask && !pixelBlocksVisited [coord.R + 0, coord.G + 0, coord.B + 1]) {
-						pixelBlocksVisited [coord.R + 0, coord.G + 0, coord.B + 1] = true;
-						st.Enqueue (new RGB (coord.R + 0, coord.G + 0, coord.B + 1));
+					if (expanded.B < BlockMask && !pixelBlocksVisited [coord + BOffset]) {
+						pixelBlocksVisited [coord + BOffset] = true;
+						st.Enqueue (coord + BOffset);
 					}
 
-					List<Pixel> pxl = pixelBlocks[coord.R,coord.G,coord.B];
+					List<Pixel> pxl = pixelBlocks[coord];
 
 					if (pxl.Count > 0) {
 						//System.Console.WriteLine ("Block " + coord.ToString ());
@@ -896,8 +907,8 @@ namespace FejesJoco.Tools.RGBGenerator
 					}
 				}*/
 				while (undoStack.Count > 0) {
-					RGB coord = undoStack.Pop ();
-					pixelBlocksVisited[coord.R,coord.G,coord.B] = false;
+					int coord = undoStack.Pop ();
+					pixelBlocksVisited[coord] = false;
 				}
 
 				watch3.Stop ();
@@ -912,8 +923,8 @@ namespace FejesJoco.Tools.RGBGenerator
 
 				//System.Console.WriteLine ("Removing here");
 
-				if (!pixelBlocks [bestPixel.block.R, bestPixel.block.G, bestPixel.block.B].Remove (bestPixel)) {
-					throw new System.Exception ("Could not remove pixel from " + bestPixel.block.ToString() + " (was found in " + bestBlock.ToString()+")");
+				if (!pixelBlocks [bestBlock].Remove (bestPixel)) {
+					throw new System.Exception ("Could not remove pixel from " + bestBlock.ToString() + " (was found in " + bestBlock.ToString()+")");
 				}
 
 				if (bestAfterFirst > 0) {
@@ -939,16 +950,18 @@ namespace FejesJoco.Tools.RGBGenerator
 				System.Console.WriteLine (watch2.Elapsed.TotalMilliseconds.ToString("0"));
 				System.Console.WriteLine (watch3.Elapsed.TotalMilliseconds.ToString("0"));
 				System.Console.WriteLine (watch4.Elapsed.TotalMilliseconds.ToString("0"));
+				System.Console.WriteLine (watch5.Elapsed.TotalMilliseconds.ToString("0"));
 			}
 
 			Stopwatch watch1 = new Stopwatch();
 			Stopwatch watch2 = new Stopwatch();
 			Stopwatch watch3 = new Stopwatch();
 			Stopwatch watch4 = new Stopwatch();
+			Stopwatch watch5 = new Stopwatch();
 
             protected override void changeQueue(Pixel p)
             {
-				watch1.Start ();
+
                 // recalculate the neighbors
                 /*for (var i = 0; i < p.Neighbors.Length; i++)
                 {
@@ -1001,6 +1014,7 @@ namespace FejesJoco.Tools.RGBGenerator
 					var np = p.Neighbors[i];
 					if (np.Empty)
 					{
+						watch1.Start ();
 						int r = 0, g = 0, b = 0, n = 0;
 						for (var j = 0; j < np.Neighbors.Length; j++)
 						{
@@ -1013,36 +1027,46 @@ namespace FejesJoco.Tools.RGBGenerator
 								n++;
 							}
 						}
+
+						r /= n;
+						g /= n;
+						b /= n;
+
 						var avg = new RGB
 						{
-							R = (byte)(r / n),
-							G = (byte)(g / n),
-							B = (byte)(b / n)
+							R = (byte)(r),
+							G = (byte)(g),
+							B = (byte)(b)
 						};
 
-						RGB newBlock = new RGB ((avg.R>>BlockOffset) & BlockMask, (avg.G>>BlockOffset) & BlockMask, (avg.B>>BlockOffset) & BlockMask);
+						RGB newBlock = new RGB ((r>>BlockOffset) & BlockMask, (g>>BlockOffset) & BlockMask, (b>>BlockOffset) & BlockMask);
+						int blockIndex = newBlock.R * ROffset + newBlock.G * GOffset + newBlock.B * BOffset;
+
+						watch1.Stop ();
+						watch5.Start ();
 
 						if (!np.inQueue) {
 							//queue.Add (np);
-							np.block = newBlock;
+							np.block = blockIndex;
 							np.inQueue = true;
-							pixelBlocks [np.block.R,np.block.G,np.block.B].Add (np);
+							pixelBlocks [blockIndex].Add (np);
 							//System.Console.WriteLine ("Adding in block " + np.block.ToString () + " " + np.QueueIndex);
-						} else if ( !newBlock.Equals(np.block) ) {
-							if (!pixelBlocks [np.block.R, np.block.G, np.block.B].Remove (np)) {
+						} else if ( blockIndex != np.block ) {
+							if (!pixelBlocks [np.block].Remove (np)) {
 								Console.WriteLine ("Could not remove even though it should be in the block");
 							}
 							np.inQueue = true;
-							np.block = newBlock;
-							pixelBlocks [np.block.R,np.block.G,np.block.B].Add (np);
+							np.block = blockIndex;
+							pixelBlocks [blockIndex].Add (np);
 							//System.Console.WriteLine ("Replacing in block " + np.block.ToString () + " " + np.QueueIndex);
 						}
 
+						watch5.Stop ();
 						np.avg = avg;
 						//queue.Data[np.QueueIndex] = avg;
 					}
 				}
-				watch1.Stop ();
+
             }
         }
         #endregion
